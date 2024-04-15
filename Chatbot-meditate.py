@@ -2,31 +2,47 @@ from pathlib import Path
 from pydub import AudioSegment
 from openai import OpenAI
 import streamlit as st
-
+import json
+import warnings
+warnings.filterwarnings("ignore", category=DeprecationWarning)
 def text_to_speech(text, voice_type="alloy", api_key=None):
-    max_length = 4096
-    chunks = [text[i:i + max_length] for i in range(0, len(text), max_length)]
-    audio_files = []
+    try:
+        client = OpenAI(api_key=api_key)
+        response = client.audio.speech.create(model="tts-1", voice=voice_type, input=text)
+        speech_file_path = Path("speech.mp3")
+        response.stream_to_file(speech_file_path)
+        return str(speech_file_path)
+    except Exception as e:
+        st.error(f"Error in text-to-speech conversion: {e}")
+        return None
 
-    for i, chunk in enumerate(chunks):
-        try:
-            client = OpenAI(api_key=api_key)
-            response = client.audio.speech.create(model="tts-1",
-                                                  voice=voice_type,
-                                                  input=chunk)
-            speech_file_path = Path(f"chunk_{i}.mp3")
-            response.stream_to_file(speech_file_path)
-            audio_files.append(AudioSegment.from_mp3(speech_file_path))
-        except Exception as e:
-            st.error(f"Error in text-to-speech conversion for chunk {i}: {e}")
-            return None
+def generate_meditation_script(user_input, api_key):
+    client = OpenAI(api_key=api_key)
+    full_prompt_input = f"""
+    Generate a customized meditation script for someone who is saying: {user_input}. 
+    Format the script as a JSON array, where each element represents a segment of the script. 
+    Each segment should have a "type" field indicating whether it's "speech" or "pause", 
+    and a "content" field containing the text for speech segments or the pause duration in seconds for pause segments.
+    """
+    messages = [{"role": "user", "content": full_prompt_input}]
+    response = client.chat.completions.create(model="gpt-3.5-turbo", messages=messages, max_tokens=500)
+    return response.choices[0].message.content.strip()
 
-    # Combine audio files into one
+def combine_audio_segments(script, voice_type, api_key):
+    audio_segments = []
+    for segment in script:
+        if segment["type"] == "speech":
+            speech_file_path = text_to_speech(segment["content"], voice_type, api_key)
+            if speech_file_path:
+                audio_segments.append(AudioSegment.from_mp3(speech_file_path))
+        elif segment["type"] == "pause":
+            pause_duration = int(float(segment["content"]) * 1000)  # Convert seconds to milliseconds
+            audio_segments.append(AudioSegment.silent(duration=pause_duration))
+
     combined = AudioSegment.empty()
-    for audio in audio_files:
-        combined += audio
+    for segment in audio_segments:
+        combined += segment
 
-    # Export combined audio to a file
     combined_file_path = "combined_speech.mp3"
     combined.export(combined_file_path, format="mp3")
     return combined_file_path
@@ -37,30 +53,28 @@ with st.sidebar:
     "[View the source code](https://github.com/streamlit/llm-examples/blob/main/TextToSpeech.py)"
     "[![Open in GitHub Codespaces](https://github.com/codespaces/badge.svg)](https://codespaces.new/streamlit/llm-examples?quickstart=1)"
 
-st.title("🎙️ Text to Speech Converter")
-st.caption("🚀 A Streamlit app for converting text to speech using OpenAI")
+st.title("🧘 MeditateGPT")
+st.caption("🚀 Customized Meditation Sessions")
 
 # Text input
-user_input = st.text_area("Enter the text you want to convert to speech:", height=150)
+user_input = st.text_area("How are you feeling right now:", height=150)
 
 # Voice selection dropdown
-voice_type = st.selectbox(
-    "Choose the voice:",
-    ["alloy", "echo", "fable", "onyx", "nova", "shimmer"])
+voice_type = st.selectbox("Choose the voice:", ["alloy", "echo", "fable", "onyx", "nova", "shimmer"])
 
 # Convert button
-if st.button("Convert to Speech"):
+if st.button("Generate Meditation"):
     if not openai_api_key:
         st.info("Please add your OpenAI API key to continue.")
         st.stop()
 
-    speech_file_path = text_to_speech(user_input, voice_type, openai_api_key)
-    if speech_file_path:
+    meditation_script_json = generate_meditation_script(user_input, openai_api_key)
+    meditation_script = json.loads(meditation_script_json)
+
+    combined_file_path = combine_audio_segments(meditation_script, voice_type, openai_api_key)
+    if combined_file_path:
         # Display audio player and download link
-        audio_file = open(speech_file_path, 'rb')
+        audio_file = open(combined_file_path, 'rb')
         audio_bytes = audio_file.read()
         st.audio(audio_bytes, format='audio/mp3')
-        st.download_button(label="Download Speech",
-                           data=audio_bytes,
-                           file_name="speech.mp3",
-                           mime="audio/mp3")
+        st.download_button(label="Download Meditation", data=audio_bytes, file_name="meditation.mp3", mime="audio/mp3")
