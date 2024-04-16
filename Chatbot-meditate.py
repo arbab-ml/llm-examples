@@ -22,7 +22,7 @@ def generate_meditation_script(user_input, api_key):
     Format the script as a JSON object with a "script" field containing an array, where each element represents a segment of the script.
     Each segment should have a "type" field indicating whether it's "speech" or "pause",
     and a "content" field containing the text for speech segments or the pause duration in seconds for pause segments.
-    Only output the JSON object with a cumulative duration (including pauses) of around 30 seconds.
+    Only output the JSON object with a cumulative duration (including pauses) of around 30 seconds. Total number of pauses should be less than 3. 
 
     Example format:
     {{
